@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no" />
+  <title>缓冲分析</title>
+  <script src="./node_modules/cesium/Build/Cesium/Cesium.js"></script>
+  <script src='./utils/cesium_zh.js'></script>
+  <script src="./node_modules/turf/turf.js"></script>
+  <style>
+    @import url(./node_modules/cesium/Build/Cesium/Widgets/widgets.css);
+
+    html,
+    body,
+    #cesiumContainer {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    #toolbar {
+      background: rgba(42, 42, 42, 0.8);
+      padding: 4px;
+      border-radius: 4px;
+      display: block;
+      position: absolute;
+      top: 5px;
+      left: 5px;
+      color: white;
+    }
+
+    #toolbar input {
+      vertical-align: middle;
+      padding-top: 2px;
+      padding-bottom: 2px;
+      width: 100px;
+
+    }
+  </style>
+</head>
+
+<body>
+  <div id="cesiumContainer" class="cesium-viewer-fullscreenContainer"></div>
+  <div id="toolbar" class="toolbar">
+    <table>
+      <tr>
+        <td>缓冲半径:</td>
+        <td>
+          <input type="input" min="1" step="1" defaultvalue:1 data-bind="value: radius" />
+        </td>
+        <td>(公里)</td>
+        <td><button class="cesium-button" data-bind="click: mypoint">点</button></td>
+        <td><button class="cesium-button" data-bind="click: myline">线</button></td>
+        <td><button class="cesium-button" data-bind="click: mypolygon">面</button></td>
+      </tr>
+
+    </table>
+  </div>
+  <script>
+    var viewer = new Cesium.Viewer("cesiumContainer", {
+      terrainProvider: Cesium.createWorldTerrain(),
+      vrButton: true,
+      timeline: false,
+      animation: false,
+    });
+    viewer._cesiumWidget._creditContainer.style.display = "none";
+    viewer.scene.globe.depthTestAgainstTerrain = true;
+
+    var initialPosition = Cesium.Cartesian3.fromDegrees(119.0, 28.0, 10000);
+    var initialOrientation = new Cesium.HeadingPitchRoll.fromDegrees(30, -30, 0);
+    viewer.scene.camera.setView({
+      destination: initialPosition,
+      orientation: initialOrientation,
+      endTransform: Cesium.Matrix4.IDENTITY,
+    });
+
+    //全局中文化
+    CesiumZh.load();
+
+    var radius = 1;
+
+    function updateRadius(value) {
+      radius = parseInt(value);
+      return radius;
+    }
+
+      //建立点缓冲区
+    function drawPoint() {
+      var handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+      //移除已存在数据源和实体
+      viewer.entities.removeAll();
+      viewer.dataSources.removeAll();
+      var position = new Cesium.Cartesian3();
+      handler.setInputAction(function (movement) {
+        position = viewer.scene.pickPosition(movement.position);
+        if (position) {
+          viewer.entities.add({
+            position: position,
+            point: {
+              color: Cesium.Color.YELLOW,
+              pixelSize: 6,
+              outlineColor: Cesium.Color.YELLOW.withAlpha(0.5),
+              outlineWidth: 2,
+              height: position[2],
+              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+            },
+          });
+          viewer.entities.add({
+            id: 'buffershape',
+            position: position,
+            ellipse: {
+              semiMajorAxis: radius * 1000,
+              semiMinorAxis: radius * 1000,
+              height: position[2],
+              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+              material: new Cesium.ColorMaterialProperty(Cesium.Color.RED.withAlpha(0.5)),
+            },
+          });
+        }
+        handler.destroy();
+      }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+    }
+
+
+    //建立线缓冲区
+    function drawLine() {
+       //判断当前是否支持贴地线
+      if (!Cesium.Entity.supportsPolylinesOnTerrain(viewer.scene)) {
+        window.alert(
+          "Polylines on terrain are not supported on this platform"
+        );
+      }
+      viewer.entities.removeAll();
+      viewer.dataSources.removeAll();
+      var handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+      var positions = [];
+      var linePositions = [];
+      var bufferPositions = [];
+      handler.setInputAction(function (movement) {
+        var cartesian = viewer.scene.pickPosition(movement.position);
+        if (cartesian) {
+          viewer.entities.add({
+            position: cartesian,
+            point: {
+              color: Cesium.Color.YELLOW,
+              pixelSize: 6,
+              outlineColor: Cesium.Color.YELLOW.withAlpha(0.5),
+              outlineWidth: 2,
+              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+            }
+          });
+          positions.push(cartesian);
+          for (var i = 0; i < positions.length; i++) {
+            if (linePositions.indexOf(positions[i]) === -1) {
+              linePositions.push(positions[i]);
+            }
+          }
+          viewer.entities.add({
+            polyline: {
+              positions: linePositions,
+              clampToGround: true,
+              width: 5,
+              material: new Cesium.PolylineOutlineMaterialProperty({
+                color: Cesium.Color.ORANGE,
+                outlineWidth: 2,
+                outlineColor: Cesium.Color.BLACK,
+              }),
+            },
+          });
+        }
+      }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+      function addBuffer(linePositions) {
+        for (var i = 0; i < linePositions.length; i++) {
+          var bufferPosition = new Cesium.Cartographic.fromCartesian(linePositions[i]);
+          var longitude = Number(Cesium.Math.toDegrees(bufferPosition.longitude).toFixed(6));
+          var latitude = Number(Cesium.Math.toDegrees(bufferPosition.latitude).toFixed(6));
+          var positionlast = [];
+          positionlast.push(longitude);
+          positionlast.push(latitude);
+          bufferPositions.push(positionlast);
+        }
+        //引入Turf.js实现线缓冲区功能
+        var line = turf.lineString(bufferPositions);
+        var buffered = turf.buffer(line, radius);
+        return viewer.dataSources.add(
+          Cesium.GeoJsonDataSource.load(
+            buffered,
+            {
+              stroke: Cesium.Color.RED,
+              fill: Cesium.Color.RED.withAlpha(0.5),
+              strokeWidth: 3,
+              clampToGround: true,
+            }
+          )
+        );
+      }
+
+      handler.setInputAction(function () {
+        handler.destroy();
+        if (linePositions) {
+          addBuffer(linePositions)
+        }
+      }, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
+    }
+    //建立面缓冲区
+    function drawPolygon() {
+      if (!Cesium.Entity.supportsPolylinesOnTerrain(viewer.scene)) {
+        window.alert(
+          "Polylines on terrain are not supported on this platform"
+        );
+      }
+      viewer.entities.removeAll();
+      viewer.dataSources.removeAll();
+      var positions = [];
+      var shapePoints = [];
+      var bufferPositions = [];
+      var unuseShape = [];
+      var shapes = [];
+
+      var handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+      handler.setInputAction(function (event) {
+        const earthPosition = viewer.scene.pickPosition(event.position);
+        if (Cesium.defined(earthPosition)) {
+          viewer.entities.add({
+            position: earthPosition,
+            point: {
+              color: Cesium.Color.YELLOW,
+              pixelSize: 6,
+              outlineColor: Cesium.Color.YELLOW.withAlpha(0.5),
+              outlineWidth: 2,
+              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+            }
+          });
+          positions.push(earthPosition);
+          for (var i = 0; i < positions.length; i++) {
+            if (shapePoints.indexOf(positions[i]) === -1) {
+              shapePoints.push(positions[i]);
+            }
+          }
+        };
+
+      }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+      handler.setInputAction(function () {
+        unuseShape.push(viewer.entities.add({
+          polygon: {
+            hierarchy: shapePoints,
+            material: new Cesium.ColorMaterialProperty(Cesium.Color.YELLOW.withAlpha(0.1))
+          }
+        })
+        )
+      }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+      handler.setInputAction(function () {
+        handler.destroy();
+        for (var i = 0; i < unuseShape.length; i++) {
+          viewer.entities.remove(unuseShape[i]);
+        }
+        terminateShape();
+        addBuffer(shapePoints);
+        shapePoints = [];
+      }, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
+
+      function terminateShape() {
+        viewer.entities.add({
+          polygon: {
+            hierarchy: shapePoints,
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+            material: new Cesium.ColorMaterialProperty(Cesium.Color.YELLOW.withAlpha(0.8)),
+            zIndex: 2
+          }
+        });
+      }
+
+      //引入turf建立面缓冲区
+      function addBuffer(shapePoints) {
+        for (var i = 0; i < shapePoints.length; i++) {
+          var bufferPosition = new Cesium.Cartographic.fromCartesian(shapePoints[i]);
+          var longitude = Number(Cesium.Math.toDegrees(bufferPosition.longitude).toFixed(6));
+          var latitude = Number(Cesium.Math.toDegrees(bufferPosition.latitude).toFixed(6));
+          var positionlast = [];
+          positionlast.push(longitude);
+          positionlast.push(latitude);
+          bufferPositions.push(positionlast);
+        }
+        bufferPositions.push(bufferPositions[0]);
+        shapes.push(bufferPositions);
+        var shape = turf.polygon(shapes);
+        var buffered = turf.buffer(shape, radius);
+        return viewer.dataSources.add(
+          Cesium.GeoJsonDataSource.load(
+            buffered,
+            {
+              stroke: Cesium.Color.RED,
+              fill: Cesium.Color.RED.withAlpha(0.5),
+              strokeWidth: 3,
+              clampToGround: true,
+            }
+          )
+        )
+      }
+    }
+
+    //选择建立的缓冲区类型
+    var viewModel = {
+      //缓冲区半径
+      radius: radius,
+      mypoint: drawPoint,
+      myline: drawLine,
+      mypolygon: drawPolygon,
+    };
+
+    Cesium.knockout.track(viewModel);
+    var toolbar = document.getElementById("toolbar");
+    Cesium.knockout.applyBindings(viewModel, toolbar);
+    Cesium.knockout
+      .getObservable(viewModel, "radius")
+      .subscribe(updateRadius);
+
+  </script>
+</body>
+
+</html>
